@@ -1,0 +1,14 @@
+# Secrets — never upload
+.env
+
+# Python environment — too large
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Mac junk
+.DS_Store
+
+# Streamlit cache
+.streamlit/
