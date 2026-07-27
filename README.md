@@ -36,7 +36,7 @@ Microsoft OneDrive — Microsoft Graph API OAuth 2.0
 | Authentication | OAuth 2.0 delegated flow via MSAL + Azure Entra ID |
 
 ## Project Structure
-
+```
 fuse-rag/
 ├── ingest.py # Document ingestion pipeline (OneDrive → Qdrant)
 ├── query.py # RAG query pipeline (terminal interface)
@@ -44,7 +44,7 @@ fuse-rag/
 ├── app.py # Streamlit chat UI with cascading folder navigation
 ├── .env # API credentials (never committed — see .gitignore)
 └── .gitignore # Excludes .env, venv/, pycache/
-
+```
 
 ## Setup
 
