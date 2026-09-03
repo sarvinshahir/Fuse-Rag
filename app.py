@@ -24,8 +24,7 @@ def get_folders():
 def build_folder_tree(folders):
     tree = {}
     for folder in folders:
-        clean = folder.replace("Fuse/Rob documents/", "")
-        parts = clean.split("/")
+        parts = folder.split("/")
         node = tree
         for part in parts:
             if part not in node:
@@ -34,7 +33,7 @@ def build_folder_tree(folders):
     return tree
 
 def get_full_path(parts):
-    return "Fuse/Rob documents/" + "/".join(parts)
+    return "/".join(parts)
 
 # ── Session state ─────────────────────────────────────────
 if "messages" not in st.session_state:
@@ -42,6 +41,9 @@ if "messages" not in st.session_state:
 
 all_folders = get_folders()
 tree = build_folder_tree(all_folders)
+
+# Start directly inside Fuse Power Management
+fpm_tree = tree.get("Fuse Power Management", {})
 
 # ── Sidebar — cascading folder selector ───────────────────
 with st.sidebar:
@@ -51,12 +53,13 @@ with st.sidebar:
     selected_path_parts = []
     selected_folder = None
 
-    level1_options = ["All Documents"] + sorted(tree.keys())
+    level1_options = ["All Fuse Power Management"] + sorted(fpm_tree.keys())
     level1 = st.selectbox("Folder", options=level1_options, index=0)
 
-    if level1 != "All Documents":
+    if level1 != "All Fuse Power Management":
+        selected_path_parts.append("Fuse Power Management")
         selected_path_parts.append(level1)
-        level2_tree = tree[level1]
+        level2_tree = fpm_tree[level1]
 
         if level2_tree:
             level2_options = ["— All in this folder —"] + sorted(level2_tree.keys())
@@ -74,22 +77,22 @@ with st.sidebar:
                         selected_path_parts.append(level3)
 
         selected_folder = get_full_path(selected_path_parts)
-        st.info(f"🔒 Scoped to:\n`{'/'.join(selected_path_parts)}`")
+        st.info(f"🔒 Scoped to:\n`{'/'.join(selected_path_parts[1:])}`")
     else:
-        st.info("🌐 Searching all documents")
+        st.info("🌐 Searching all Fuse Power Management documents")
 
     if st.button("🔄 New Conversation"):
         st.session_state.messages = []
 
 # ── Chat history ──────────────────────────────────────────
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        if "sources" in message and message["sources"]:
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if "sources" in msg and msg["sources"]:
             with st.expander("📄 Sources"):
-                for source in message["sources"]:
+                for source in msg["sources"]:
                     st.write(f"**{source['filename']}**")
-                    st.caption(source["folder_path"])
+                    st.caption(source["folder_path"].replace("Fuse Power Management/", ""))
 
 # ── Chat input ────────────────────────────────────────────
 if prompt := st.chat_input("Ask a question about Fuse documents..."):
@@ -103,7 +106,11 @@ if prompt := st.chat_input("Ask a question about Fuse documents..."):
             try:
                 payload = {
                     "question": prompt,
-                    "folder_path": selected_folder
+                    "folder_path": selected_folder,
+                    "history": [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in st.session_state.messages[-6:]
+                    ]
                 }
                 response = requests.post(f"{API_URL}/query", json=payload)
                 data = response.json()
@@ -119,7 +126,7 @@ if prompt := st.chat_input("Ask a question about Fuse documents..."):
             with st.expander("📄 Sources"):
                 for source in sources:
                     st.write(f"**{source['filename']}**")
-                    st.caption(source["folder_path"])
+                    st.caption(source["folder_path"].replace("Fuse Power Management/", ""))
 
     st.session_state.messages.append({
         "role": "assistant",

@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fuse AI Knowledge Assistant</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #F7F8FA;
+    --sidebar: #FFFFFF;
+    --accent: #0066CC;
+    --accent-light: #E8F0FB;
+    --text: #1A1A2E;
+    --text-muted: #6B7280;
+    --border: #E5E7EB;
+    --ai-bubble: #F3F4F6;
+    --shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    width: 290px;
+    min-width: 290px;
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .sidebar-header {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-icon {
+    width: 34px; height: 34px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .logo-text { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+  .logo-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  .sidebar-content { padding: 16px; flex: 1; overflow: visible; }
+
+  .scope-label {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;
+  }
+
+  /* ── Custom dropdown ── */
+  .custom-select { position: relative; margin-bottom: 10px; }
+  .custom-select-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+
+  .select-trigger {
+    width: 100%;
+    padding: 9px 32px 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: white;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    position: relative;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .select-trigger:hover { border-color: var(--accent); }
+  .select-trigger.open { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,102,204,0.12); }
+
+  .select-trigger-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .select-arrow {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    font-size: 10px;
+  }
+  .select-trigger.open .select-arrow { transform: rotate(180deg); }
+
+  .select-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+    max-height: 320px;
+  }
+
+  .select-dropdown.open { display: flex; }
+
+  .select-search {
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    outline: none;
+    border-radius: 10px 10px 0 0;
+    color: var(--text);
+  }
+
+  .select-options {
+    overflow-y: auto;
+    flex: 1;
+    padding: 4px 0;
+  }
+
+  .select-option {
+    padding: 9px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
+    transition: background 0.1s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .select-option:hover { background: var(--accent-light); color: var(--accent); }
+  .select-option.selected { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+  .select-option.placeholder { color: var(--text-muted); font-style: italic; }
+
+  .scope-indicator {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--accent-light);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--accent);
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .sidebar-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .new-chat-btn {
+    width: 100%;
+    padding: 9px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: background 0.15s;
+  }
+  .new-chat-btn:hover { background: var(--bg); }
+
+  /* ── Main ── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .chat-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: white;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .chat-header h1 { font-size: 16px; font-weight: 600; }
+  .status-dot { width: 8px; height: 8px; background: #10B981; border-radius: 50%; }
+
+  .messages {
+    flex: 1; overflow-y: auto; padding: 24px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--text-muted); gap: 12px; padding: 40px; text-align: center;
+  }
+  .empty-icon { font-size: 40px; }
+  .empty-title { font-size: 18px; font-weight: 600; color: var(--text); }
+  .empty-sub { font-size: 14px; line-height: 1.6; max-width: 360px; }
+
+  .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+  .suggestion-chip {
+    padding: 8px 14px; background: white; border: 1px solid var(--border);
+    border-radius: 20px; font-size: 13px; color: var(--text); cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .suggestion-chip:hover { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
+
+  .message { display: flex; gap: 12px; max-width: 800px; }
+  .message.user { flex-direction: row-reverse; margin-left: auto; }
+
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .avatar.user { background: var(--accent); color: white; font-size: 12px; font-weight: 600; }
+  .avatar.ai { background: var(--accent-light); }
+
+  .bubble {
+    max-width: calc(100% - 44px); padding: 12px 16px; border-radius: 16px;
+    font-size: 14px; line-height: 1.6;
+  }
+  .bubble.user { background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+  .bubble.ai { background: var(--ai-bubble); color: var(--text); border-bottom-left-radius: 4px; }
+  .bubble p { margin-bottom: 8px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble ul, .bubble ol { padding-left: 18px; margin-bottom: 8px; }
+  .bubble li { margin-bottom: 4px; }
+  .bubble strong { font-weight: 600; }
+
+  .sources-toggle {
+    margin-top: 10px; font-size: 12px; color: var(--accent);
+    cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none;
+  }
+  .sources-toggle:hover { text-decoration: underline; }
+
+  .sources-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .source-item { padding: 8px 12px; background: white; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+  .source-name { font-weight: 600; color: var(--text); }
+  .source-path { color: var(--text-muted); margin-top: 2px; }
+
+  .thinking {
+    display: flex; gap: 4px; align-items: center; padding: 12px 16px;
+    background: var(--ai-bubble); border-radius: 16px; border-bottom-left-radius: 4px; width: fit-content;
+  }
+  .dot { width: 6px; height: 6px; background: var(--text-muted); border-radius: 50%; animation: bounce 1.2s infinite; }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+  .input-area { padding: 16px 24px 20px; background: white; border-top: 1px solid var(--border); }
+  .input-wrapper {
+    display: flex; align-items: flex-end; gap: 10px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px 10px 10px 16px; transition: border-color 0.15s;
+  }
+  .input-wrapper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,102,204,0.1); }
+  #chat-input {
+    flex: 1; border: none; background: transparent; font-size: 14px; color: var(--text);
+    resize: none; outline: none; max-height: 120px; line-height: 1.5; font-family: inherit;
+  }
+  #chat-input::placeholder { color: var(--text-muted); }
+  .send-btn {
+    width: 36px; height: 36px; background: var(--accent); border: none; border-radius: 8px;
+    color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s; flex-shrink: 0;
+  }
+  .send-btn:hover { background: #0052A3; }
+  .send-btn:disabled { background: var(--border); cursor: not-allowed; }
+  .input-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <div class="logo-text">Fuse AI Assistant</div>
+        <div class="logo-sub">Knowledge Search</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar-content">
+    <div class="scope-label">Document Scope</div>
+
+    <div class="custom-select" id="cs-l1">
+      <div class="custom-select-label">Project folder</div>
+      <div class="select-trigger" id="trigger-l1" onclick="toggleDropdown('l1')">
+        <span class="select-trigger-text" id="text-l1">All Fuse Power Management</span>
+        <span class="select-arrow">▼</span>
+      </div>
+      <div class="select-dropdown" id="dropdown-l1">
+        <input class="select-search" placeholder="Search folders..." oninput="filterOptions('l1', this.value)" autocomplete="off">
+        <div class="select-options" id="options-l1"></div>
+      </div>
+    </div>
+
+    <div class="custom-select" id="cs-l2" style="display:none">
+      <div class="custom-select-label">Subfolder</div>
+      <div class="select-trigger" id="trigger-l2" onclick="toggleDropdown('l2')">
+        <span class="select-trigger-text" id="text-l2">— All in this folder —</span>
+        <span class="select-arrow">▼</span>
+      </div>
+      <div class="select-dropdown" id="dropdown-l2">
+        <input class="select-search" placeholder="Search..." oninput="filterOptions('l2', this.value)" autocomplete="off">
+        <div class="select-options" id="options-l2"></div>
+      </div>
+    </div>
+
+    <div class="custom-select" id="cs-l3" style="display:none">
+      <div class="custom-select-label">Sub-subfolder</div>
+      <div class="select-trigger" id="trigger-l3" onclick="toggleDropdown('l3')">
+        <span class="select-trigger-text" id="text-l3">— All in this folder —</span>
+        <span class="select-arrow">▼</span>
+      </div>
+      <div class="select-dropdown" id="dropdown-l3">
+        <input class="select-search" placeholder="Search..." oninput="filterOptions('l3', this.value)" autocomplete="off">
+        <div class="select-options" id="options-l3"></div>
+      </div>
+    </div>
+
+    <div class="scope-indicator" id="scope-indicator">
+      🌐 Searching all Fuse Power Management documents
+    </div>
+  </div>
+
+  <div class="sidebar-footer">
+    <button class="new-chat-btn" onclick="newConversation()">↺ New conversation</button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="chat-header">
+    <div class="status-dot"></div>
+    <h1>Fuse AI Knowledge Assistant</h1>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-title">Ask anything about Fuse documents</div>
+      <div class="empty-sub">Search across all project folders or narrow your scope using the sidebar.</div>
+      <div class="suggestions">
+        <div class="suggestion-chip" onclick="sendSuggestion('Who are Fuse\'s partners in the BC Hydro RFP?')">BC Hydro RFP partners</div>
+        <div class="suggestion-chip" onclick="sendSuggestion('What is the e-Auto Challenge about?')">e-Auto Challenge</div>
+        <div class="suggestion-chip" onclick="sendSuggestion('What projects is Fuse working on?')">Current projects</div>
+        <div class="suggestion-chip" onclick="sendSuggestion('Who is on the Fuse team?')">Fuse team</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-wrapper">
+      <textarea id="chat-input" placeholder="Ask a question about Fuse documents..." rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+      </button>
+    </div>
+    <div class="input-hint">Press Enter to send · Shift+Enter for new line</div>
+  </div>
+</main>
+
+<script>
+const API = 'http://localhost:8000';
+let folderTree = {};
+let messages = [];
+let currentFolder = null;
+let selectedL1 = null, selectedL2 = null, selectedL3 = null;
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', (e) => {
+  ['l1','l2','l3'].forEach(level => {
+    const dd = document.getElementById(`dropdown-${level}`);
+    const trigger = document.getElementById(`trigger-${level}`);
+    if (dd && !dd.contains(e.target) && !trigger.contains(e.target)) {
+      dd.classList.remove('open');
+      trigger.classList.remove('open');
+    }
+  });
+});
+
+function toggleDropdown(level) {
+  const dd = document.getElementById(`dropdown-${level}`);
+  const trigger = document.getElementById(`trigger-${level}`);
+  const isOpen = dd.classList.contains('open');
+  // close all
+  ['l1','l2','l3'].forEach(l => {
+    document.getElementById(`dropdown-${l}`).classList.remove('open');
+    document.getElementById(`trigger-${l}`).classList.remove('open');
+  });
+  if (!isOpen) {
+    dd.classList.add('open');
+    trigger.classList.add('open');
+    const search = dd.querySelector('.select-search');
+    if (search) { search.value = ''; filterOptions(level, ''); search.focus(); }
+  }
+}
+
+function filterOptions(level, query) {
+  const container = document.getElementById(`options-${level}`);
+  const items = container.querySelectorAll('.select-option');
+  const q = query.toLowerCase();
+  items.forEach(item => {
+    item.style.display = item.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+  });
+}
+
+function buildOptions(level, items, onSelect) {
+  const container = document.getElementById(`options-${level}`);
+  container.innerHTML = '';
+
+  if (level !== 'l1') {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'select-option placeholder';
+    placeholder.textContent = '— All in this folder —';
+    placeholder.onclick = () => onSelect(null);
+    container.appendChild(placeholder);
+  } else {
+    const all = document.createElement('div');
+    all.className = 'select-option placeholder';
+    all.textContent = 'All Fuse Power Management';
+    all.onclick = () => onSelect(null);
+    container.appendChild(all);
+  }
+
+  items.sort().forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'select-option';
+    div.textContent = item;
+    div.onclick = () => onSelect(item);
+    container.appendChild(div);
+  });
+}
+
+async function loadFolders() {
+  try {
+    const res = await fetch(`${API}/folders`);
+    const data = await res.json();
+    buildTree(data.folders || []);
+    const fpm = folderTree['Fuse Power Management'] || {};
+    buildOptions('l1', Object.keys(fpm), selectL1);
+  } catch(e) {
+    console.error('Could not load folders:', e);
+  }
+}
+
+function buildTree(folders) {
+  folderTree = {};
+  for (const f of folders) {
+    const parts = f.split('/');
+    let node = folderTree;
+    for (const p of parts) {
+      if (!node[p]) node[p] = {};
+      node = node[p];
+    }
+  }
+}
+
+function selectL1(value) {
+  selectedL1 = value;
+  selectedL2 = null;
+  selectedL3 = null;
+
+  document.getElementById('text-l1').textContent = value || 'All Fuse Power Management';
+  document.getElementById('dropdown-l1').classList.remove('open');
+  document.getElementById('trigger-l1').classList.remove('open');
+
+  document.getElementById('cs-l2').style.display = 'none';
+  document.getElementById('cs-l3').style.display = 'none';
+  document.getElementById('text-l2').textContent = '— All in this folder —';
+  document.getElementById('text-l3').textContent = '— All in this folder —';
+
+  if (value) {
+    currentFolder = `Fuse Power Management/${value}`;
+    const fpm = folderTree['Fuse Power Management'] || {};
+    const subs = Object.keys(fpm[value] || {});
+    if (subs.length > 0) {
+      buildOptions('l2', subs, selectL2);
+      document.getElementById('cs-l2').style.display = 'block';
+    }
+  } else {
+    currentFolder = null;
+  }
+  updateScope();
+}
+
+function selectL2(value) {
+  selectedL2 = value;
+  selectedL3 = null;
+
+  document.getElementById('text-l2').textContent = value || '— All in this folder —';
+  document.getElementById('dropdown-l2').classList.remove('open');
+  document.getElementById('trigger-l2').classList.remove('open');
+  document.getElementById('cs-l3').style.display = 'none';
+  document.getElementById('text-l3').textContent = '— All in this folder —';
+
+  if (value) {
+    currentFolder = `Fuse Power Management/${selectedL1}/${value}`;
+    const fpm = folderTree['Fuse Power Management'] || {};
+    const subs = Object.keys(((fpm[selectedL1] || {})[value]) || {});
+    if (subs.length > 0) {
+      buildOptions('l3', subs, selectL3);
+      document.getElementById('cs-l3').style.display = 'block';
+    }
+  } else {
+    currentFolder = `Fuse Power Management/${selectedL1}`;
+  }
+  updateScope();
+}
+
+function selectL3(value) {
+  selectedL3 = value;
+  document.getElementById('text-l3').textContent = value || '— All in this folder —';
+  document.getElementById('dropdown-l3').classList.remove('open');
+  document.getElementById('trigger-l3').classList.remove('open');
+
+  currentFolder = value
+    ? `Fuse Power Management/${selectedL1}/${selectedL2}/${value}`
+    : `Fuse Power Management/${selectedL1}/${selectedL2}`;
+  updateScope();
+}
+
+function updateScope() {
+  const el = document.getElementById('scope-indicator');
+  if (!currentFolder) {
+    el.textContent = '🌐 Searching all Fuse Power Management documents';
+  } else {
+    const display = currentFolder.replace('Fuse Power Management/', '');
+    el.innerHTML = `🔒 Scoped to: <strong>${display}</strong>`;
+  }
+}
+
+// ── Chat ──
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function sendSuggestion(text) {
+  document.getElementById('chat-input').value = text;
+  sendMessage();
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  hideEmptyState();
+  addMessage('user', text);
+  messages.push({ role: 'user', content: text });
+  input.value = '';
+  input.style.height = 'auto';
+
+  const thinkingId = addThinking();
+  document.getElementById('send-btn').disabled = true;
+
+  try {
+    const res = await fetch(`${API}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: text,
+        folder_path: currentFolder || null,
+        history: messages.slice(-6)
+      })
+    });
+    const data = await res.json();
+    removeThinking(thinkingId);
+    const answer = data.answer || 'No answer returned.';
+    const sources = data.sources || [];
+    addMessage('ai', answer, sources);
+    messages.push({ role: 'assistant', content: answer });
+  } catch(e) {
+    removeThinking(thinkingId);
+    addMessage('ai', 'Error connecting to the API. Make sure the FastAPI server is running at localhost:8000.');
+  }
+
+  document.getElementById('send-btn').disabled = false;
+}
+
+function hideEmptyState() {
+  const el = document.getElementById('empty-state');
+  if (el) el.remove();
+}
+
+function addMessage(role, text, sources) {
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = `avatar ${role}`;
+  avatar.textContent = role === 'user' ? 'S' : '⚡';
+
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${role}`;
+  bubble.innerHTML = formatText(text);
+
+  if (sources && sources.length > 0) {
+    const toggle = document.createElement('div');
+    toggle.className = 'sources-toggle';
+    toggle.innerHTML = `▸ ${sources.length} source${sources.length > 1 ? 's' : ''}`;
+
+    const list = document.createElement('div');
+    list.className = 'sources-list';
+    list.style.display = 'none';
+
+    sources.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'source-item';
+      const path = s.folder_path.replace('Fuse Power Management/', '');
+      item.innerHTML = `<div class="source-name">${s.filename}</div><div class="source-path">${path}</div>`;
+      list.appendChild(item);
+    });
+
+    toggle.onclick = () => {
+      const open = list.style.display !== 'none';
+      list.style.display = open ? 'none' : 'flex';
+      toggle.innerHTML = `${open ? '▸' : '▾'} ${sources.length} source${sources.length > 1 ? 's' : ''}`;
+    };
+
+    bubble.appendChild(toggle);
+    bubble.appendChild(list);
+  }
+
+  div.appendChild(avatar);
+  div.appendChild(bubble);
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function formatText(text) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>')
+    .replace(/^/, '<p>')
+    .replace(/$/, '</p>');
+}
+
+let thinkingCounter = 0;
+function addThinking() {
+  const id = 'thinking-' + (++thinkingCounter);
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'message ai';
+  div.id = id;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar ai';
+  avatar.textContent = '⚡';
+
+  const thinking = document.createElement('div');
+  thinking.className = 'thinking';
+  thinking.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+
+  div.appendChild(avatar);
+  div.appendChild(thinking);
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+
+function removeThinking(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function newConversation() {
+  messages = [];
+  const container = document.getElementById('messages');
+  container.innerHTML = `
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-title">Ask anything about Fuse documents</div>
+      <div class="empty-sub">Search across all project folders or narrow your scope using the sidebar.</div>
+      <div class="suggestions">
+        <div class="suggestion-chip" onclick="sendSuggestion('Who are Fuse\\'s partners in the BC Hydro RFP?')">BC Hydro RFP partners</div>
+        <div class="suggestion-chip" onclick="sendSuggestion('What is the e-Auto Challenge about?')">e-Auto Challenge</div>
+        <div class="suggestion-chip" onclick="sendSuggestion('What projects is Fuse working on?')">Current projects</div>
+        <div class="suggestion-chip" onclick="sendSuggestion('Who is on the Fuse team?')">Fuse team</div>
+      </div>
+    </div>`;
+}
+
+loadFolders();
+</script>
+</body>
+</html>

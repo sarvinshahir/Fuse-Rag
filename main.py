@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchText
 from openai import OpenAI
@@ -29,9 +29,14 @@ COLLECTION_NAME = "fuse-knowledge"
 TOP_K = 15
 
 # ── Request model ─────────────────────────────────────────
+class Message(BaseModel):
+    role: str
+    content: str
+
 class QueryRequest(BaseModel):
     question: str
     folder_path: Optional[str] = None
+    history: Optional[List[Message]] = []
 
 # ── Embed query ───────────────────────────────────────────
 def embed_query(text):
@@ -71,14 +76,35 @@ def is_search_query(message):
         model="gpt-4o-mini",
         messages=[{
             "role": "user",
-            "content": f"Is this message a question that requires searching documents, or just a conversational comment? Reply with only 'search' or 'conversation'.\n\nMessage: {message}"
+            "content": f"Is this message related to finding, listing, or retrieving information from documents? This includes follow-up requests like 'more', 'list them', 'give me names', 'from the folder', 'what else', 'who else'. Reply with only 'search' or 'conversation'. Only reply 'conversation' for greetings, thanks, and clearly social messages.\n\nMessage: {message}"
         }],
         temperature=0
     )
     return response.choices[0].message.content.strip().lower() == "search"
 
+# ── Rewrite query with conversation context ───────────────
+def rewrite_query(question, history):
+    if not history:
+        return question
+
+    # only use last 4 messages for context
+    recent = history[-4:]
+    history_text = "\n".join([f"{m.role}: {m.content}" for m in recent])
+
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{
+            "role": "user",
+            "content": f"Given this conversation history, rewrite the latest question as a complete standalone search query that includes all necessary context.\n\nConversation:\n{history_text}\nLatest question: {question}\n\nRewritten query (just the query, nothing else):"
+        }],
+        temperature=0
+    )
+    return response.choices[0].message.content.strip()
+
 # ── Generate answer ───────────────────────────────────────
-def generate_answer(query_text, folder_path=None):
+def generate_answer(query_text, folder_path=None, history=None):
+    if history is None:
+        history = []
 
     # check if this is a real search query or just conversation
     if not is_search_query(query_text):
@@ -95,7 +121,10 @@ def generate_answer(query_text, folder_path=None):
             "sources": []
         }
 
-    results = search(query_text, folder_path)
+    # rewrite query with conversation context if there's history
+    search_query = rewrite_query(query_text, history) if history else query_text
+
+    results = search(search_query, folder_path)
 
     if not results:
         return {
@@ -126,7 +155,14 @@ def generate_answer(query_text, folder_path=None):
             "folder_path": folder
         })
 
-    prompt = f"""You are an AI assistant for Fuse Power Management.
+    # build messages with history for context-aware generation
+    messages = []
+    for m in history[-6:]:
+        messages.append({"role": m.role, "content": m.content})
+
+    messages.append({
+        "role": "user",
+        "content": f"""You are an AI assistant for Fuse Power Management.
 Answer the question based on the context provided below.
 Extract and summarize any relevant information you find, even if it is partial.
 If the answer is not in the context, say you couldn't find it in the selected documents and suggest trying a different folder.
@@ -139,10 +175,11 @@ Context:
 Question: {query_text}
 
 Answer:"""
+    })
 
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         temperature=0
     )
 
@@ -172,5 +209,9 @@ def get_folders():
 
 @app.post("/query")
 def query(request: QueryRequest):
-    result = generate_answer(request.question, request.folder_path)
+    result = generate_answer(
+        request.question,
+        request.folder_path,
+        request.history
+    )
     return result
