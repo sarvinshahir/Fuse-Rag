@@ -1,8 +1,9 @@
 import os
-from fastapi import FastAPI
+import secrets
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from typing import Optional, List
 from qdrant_client import QdrantClient
@@ -29,6 +30,24 @@ qdrant = QdrantClient(
 
 COLLECTION_NAME = "fuse-knowledge"
 TOP_K = 15
+
+security = HTTPBasic()
+
+def verify_password(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(
+        credentials.username.encode("utf8"),
+        "fuse".encode("utf8")
+    )
+    correct_password = secrets.compare_digest(
+        credentials.password.encode("utf8"),
+        os.getenv("UI_PASSWORD", "fuse2026").encode("utf8")
+    )
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
 # ── Request model ─────────────────────────────────────────
 class Message(BaseModel):
@@ -190,10 +209,8 @@ Answer:"""
 def root():
     return {"status": "Fuse AI Knowledge Assistant is running"}
 
-import os
-
 @app.get("/ui")
-def serve_ui():
+def serve_ui(credentials: HTTPBasicCredentials = Depends(verify_password)):
     return FileResponse(os.path.join(os.path.dirname(__file__), "app.html"))
 
 @app.get("/folders")
