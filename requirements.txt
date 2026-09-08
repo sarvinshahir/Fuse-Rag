@@ -1,0 +1,11 @@
+qdrant-client==1.16.1
+openai
+python-dotenv
+msal
+requests
+python-docx
+PyMuPDF
+openpyxl
+fastapi==0.100.0
+uvicorn
+pydantic==1.10.21

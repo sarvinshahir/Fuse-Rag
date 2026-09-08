@@ -1,6 +1,8 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from qdrant_client import QdrantClient
@@ -87,7 +89,6 @@ def rewrite_query(question, history):
     if not history:
         return question
 
-    # only use last 4 messages for context
     recent = history[-4:]
     history_text = "\n".join([f"{m.role}: {m.content}" for m in recent])
 
@@ -106,7 +107,6 @@ def generate_answer(query_text, folder_path=None, history=None):
     if history is None:
         history = []
 
-    # check if this is a real search query or just conversation
     if not is_search_query(query_text):
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -121,9 +121,7 @@ def generate_answer(query_text, folder_path=None, history=None):
             "sources": []
         }
 
-    # rewrite query with conversation context if there's history
     search_query = rewrite_query(query_text, history) if history else query_text
-
     results = search(search_query, folder_path)
 
     if not results:
@@ -155,7 +153,6 @@ def generate_answer(query_text, folder_path=None, history=None):
             "folder_path": folder
         })
 
-    # build messages with history for context-aware generation
     messages = []
     for m in history[-6:]:
         messages.append({"role": m.role, "content": m.content})
@@ -192,6 +189,12 @@ Answer:"""
 @app.get("/")
 def root():
     return {"status": "Fuse AI Knowledge Assistant is running"}
+
+import os
+
+@app.get("/ui")
+def serve_ui():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "app.html"))
 
 @app.get("/folders")
 def get_folders():
