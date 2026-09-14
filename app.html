@@ -592,7 +592,7 @@ async function sendMessage() {
     messages.push({ role: 'assistant', content: answer });
   } catch(e) {
     removeThinking(thinkingId);
-    addMessage('ai', 'Error connecting to the API. Make sure the FastAPI server is running at localhost:8000.');
+    addMessage('ai', 'Error connecting to the API. Please try again or contact support.');
   }
 
   document.getElementById('send-btn').disabled = false;
