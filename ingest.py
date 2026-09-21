@@ -27,6 +27,8 @@ qdrant = QdrantClient(
     api_key=os.getenv("QDRANT_API_KEY")
 )
 
+DELTA_TOKEN_FILE = "delta_token.txt"
+
 # ── Progress tracking ─────────────────────────────────────
 def load_ingested():
     if not os.path.exists(PROGRESS_FILE):
@@ -37,6 +39,17 @@ def load_ingested():
 def mark_ingested(file_id):
     with open(PROGRESS_FILE, "a") as f:
         f.write(file_id + "\n")
+
+# ── Delta token ───────────────────────────────────────────
+def load_delta_token():
+    if os.path.exists(DELTA_TOKEN_FILE):
+        with open(DELTA_TOKEN_FILE, "r") as f:
+            return f.read().strip()
+    return None
+
+def save_delta_token(token):
+    with open(DELTA_TOKEN_FILE, "w") as f:
+        f.write(token)
 
 # ── Authentication ────────────────────────────────────────
 def create_msal_app():
@@ -62,7 +75,42 @@ def maybe_refresh_token(msal_app, token, token_time):
         return new_token, time.time()
     return token, token_time
 
-# ── OneDrive navigation ───────────────────────────────────
+# ── Delta sync — get only changed files ───────────────────
+def get_delta_changes(token, user_id, delta_token):
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"https://graph.microsoft.com/v1.0/users/{user_id}/drive/root/delta?token={delta_token}"
+
+    changed = []
+    deleted = []
+    new_delta_token = None
+
+    print("Fetching changes since last sync...")
+    while url:
+        response = requests.get(url, headers=headers, timeout=30).json()
+
+        for item in response.get("value", []):
+            if item.get("deleted"):
+                deleted.append(item["id"])
+            elif "file" in item:
+                ext = item["name"].split(".")[-1].lower()
+                size = item.get("size", 0)
+                if ext in SUPPORTED_EXTENSIONS and size <= MAX_FILE_SIZE:
+                    changed.append({
+                        "id": item["id"],
+                        "name": item["name"],
+                        "folder_path": item.get("parentReference", {}).get("path", "").split("root:")[-1].strip("/"),
+                        "full_path": item.get("parentReference", {}).get("path", "").split("root:")[-1].strip("/") + "/" + item["name"]
+                    })
+
+        url = response.get("@odata.nextLink")
+        if not url:
+            delta_link = response.get("@odata.deltaLink", "")
+            if "token=" in delta_link:
+                new_delta_token = delta_link.split("token=")[-1]
+
+    return changed, deleted, new_delta_token
+
+# ── Full scan — used when no delta token exists ───────────
 def get_folder_id(token, folder_name, user_id, parent_id="root"):
     headers = {"Authorization": f"Bearer {token}"}
     url = f"https://graph.microsoft.com/v1.0/users/{user_id}/drive/items/{parent_id}/children"
@@ -91,18 +139,9 @@ def list_files_recursive(token, user_id, folder_id, current_path=""):
                 size = item.get("size", 0)
                 if ext in SUPPORTED_EXTENSIONS:
                     if size > MAX_FILE_SIZE:
-                        skipped.append({
-                            "name": item["name"],
-                            "path": item_path,
-                            "size_mb": round(size / 1_000_000, 1)
-                        })
+                        skipped.append({"name": item["name"], "path": item_path, "size_mb": round(size/1_000_000, 1)})
                     else:
-                        files.append({
-                            "id": item["id"],
-                            "name": item["name"],
-                            "folder_path": current_path,
-                            "full_path": item_path
-                        })
+                        files.append({"id": item["id"], "name": item["name"], "folder_path": current_path, "full_path": item_path})
         url = response.get("@odata.nextLink")
 
     return files, skipped
@@ -125,7 +164,6 @@ def extract_text(token, user_id, file_info):
                 return ""
 
     ext = file_info["name"].split(".")[-1].lower()
-
     try:
         if ext == "pdf":
             doc = fitz.open(stream=response.content, filetype="pdf")
@@ -190,7 +228,6 @@ def setup_collection():
         print(f"Created collection: {COLLECTION_NAME}")
     else:
         print(f"Collection already exists: {COLLECTION_NAME}")
-
     try:
         qdrant.create_payload_index(
             collection_name=COLLECTION_NAME,
@@ -200,48 +237,31 @@ def setup_collection():
     except Exception:
         pass
 
-# ── Main pipeline ─────────────────────────────────────────
-def ingest():
-    setup_collection()
+# ── Delete vectors for a file ─────────────────────────────
+def delete_file_vectors(file_id):
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    try:
+        qdrant.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=Filter(
+                must=[FieldCondition(key="file_id", match=MatchValue(value=file_id))]
+            )
+        )
+        print(f"  Deleted vectors for file: {file_id}")
+    except Exception as e:
+        print(f"  Could not delete vectors: {e}")
 
+# ── Process a list of files ───────────────────────────────
+def process_files(files, token, user_id, msal_app, token_time):
     ingested = load_ingested()
-    print(f"Already ingested: {len(ingested)} files — skipping these.")
-
-    msal_app = create_msal_app()
-    token = get_access_token(msal_app)
-    token_time = time.time()
-
-    user_id = ONEDRIVE_USER
-    print(f"Targeting OneDrive: {user_id}")
-
-    # Navigate to target folder
-    parent_id = "root"
-    if ONEDRIVE_PARENT:
-        parent_id = get_folder_id(token, ONEDRIVE_PARENT, user_id) or "root"
-
-    folder_id = get_folder_id(token, ONEDRIVE_FOLDER, user_id, parent_id=parent_id)
-    if not folder_id:
-        print(f"ERROR: Could not find '{ONEDRIVE_FOLDER}' folder")
-        return
-
-    print(f"Scanning {ONEDRIVE_FOLDER}...")
-    files, skipped = list_files_recursive(token, user_id, folder_id, current_path=ONEDRIVE_FOLDER)
-    print(f"Found {len(files)} files total")
-
-    if skipped:
-        print(f"Skipped {len(skipped)} large files:")
-        for s in skipped:
-            print(f"  - {s['name']} ({s['size_mb']}MB)")
-
     to_process = [f for f in files if f["id"] not in ingested]
-    print(f"To process: {len(to_process)} new files\n")
+    print(f"To process: {len(to_process)} files")
 
     for idx, file_info in enumerate(to_process):
         token, token_time = maybe_refresh_token(msal_app, token, token_time)
-
         print(f"[{idx+1}/{len(to_process)}] {file_info['full_path']}")
-        text = extract_text(token, user_id, file_info)
 
+        text = extract_text(token, user_id, file_info)
         if not text.strip():
             print(f"  Skipping (no text extracted)")
             mark_ingested(file_info["id"])
@@ -263,7 +283,8 @@ def ingest():
                         "filename": file_info["name"],
                         "folder_path": file_info["folder_path"],
                         "full_path": file_info["full_path"],
-                        "chunk_index": i
+                        "chunk_index": i,
+                        "file_id": file_info["id"]
                     }
                 ))
 
@@ -272,6 +293,69 @@ def ingest():
 
         mark_ingested(file_info["id"])
         print(f"  Uploaded {len(points)} chunks")
+
+    return token, token_time
+
+# ── Main pipeline ─────────────────────────────────────────
+def ingest():
+    setup_collection()
+
+    msal_app = create_msal_app()
+    token = get_access_token(msal_app)
+    token_time = time.time()
+    user_id = ONEDRIVE_USER
+
+    delta_token = load_delta_token()
+
+    if delta_token:
+        # ── Delta sync mode ───────────────────────────────
+        print("Delta token found — running incremental sync...")
+        changed, deleted, new_delta_token = get_delta_changes(token, user_id, delta_token)
+
+        print(f"Changed/new files: {len(changed)}")
+        print(f"Deleted files: {len(deleted)}")
+
+        # Remove deleted files from Qdrant
+        for file_id in deleted:
+            delete_file_vectors(file_id)
+
+        # Process changed/new files
+        if changed:
+            token, token_time = process_files(changed, token, user_id, msal_app, token_time)
+
+        # Save new delta token
+        if new_delta_token:
+            save_delta_token(new_delta_token)
+            print("Delta token updated.")
+
+    else:
+        # ── Full scan mode (first time) ───────────────────
+        print("No delta token — running full scan...")
+        parent_id = "root"
+        if ONEDRIVE_PARENT:
+            parent_id = get_folder_id(token, ONEDRIVE_PARENT, user_id) or "root"
+
+        folder_id = get_folder_id(token, ONEDRIVE_FOLDER, user_id, parent_id=parent_id)
+        if not folder_id:
+            print(f"ERROR: Could not find '{ONEDRIVE_FOLDER}' folder")
+            return
+
+        print(f"Scanning {ONEDRIVE_FOLDER}...")
+        files, skipped = list_files_recursive(token, user_id, folder_id, current_path=ONEDRIVE_FOLDER)
+        print(f"Found {len(files)} files total")
+
+        if skipped:
+            print(f"Skipped {len(skipped)} large files:")
+            for s in skipped:
+                print(f"  - {s['name']} ({s['size_mb']}MB)")
+
+        token, token_time = process_files(files, token, user_id, msal_app, token_time)
+
+        # Get and save delta token after full scan
+        print("Saving delta token for future incremental syncs...")
+        _, _, new_delta_token = get_delta_changes(token, user_id, "")
+        if new_delta_token:
+            save_delta_token(new_delta_token)
 
     print("\nIngestion complete.")
 
