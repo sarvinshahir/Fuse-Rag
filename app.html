@@ -35,12 +35,13 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .sidebar-header {
     padding: 20px 20px 16px;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
   .logo { display: flex; align-items: center; gap: 10px; }
@@ -54,14 +55,17 @@
   .logo-text { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
   .logo-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-  .sidebar-content { padding: 16px; flex: 1; overflow: visible; }
+  .sidebar-content {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+  }
 
   .scope-label {
     font-size: 11px; font-weight: 600; color: var(--text-muted);
     text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;
   }
 
-  /* ── Custom dropdown ── */
   .custom-select { position: relative; margin-bottom: 10px; }
   .custom-select-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 
@@ -74,35 +78,21 @@
     font-size: 13px;
     color: var(--text);
     cursor: pointer;
-    text-align: left;
-    position: relative;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
   }
-
   .select-trigger:hover { border-color: var(--accent); }
   .select-trigger.open { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,102,204,0.12); }
-
   .select-trigger-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .select-arrow {
-    flex-shrink: 0;
-    color: var(--text-muted);
-    transition: transform 0.2s;
-    font-size: 10px;
-  }
+  .select-arrow { flex-shrink: 0; color: var(--text-muted); transition: transform 0.2s; font-size: 10px; }
   .select-trigger.open .select-arrow { transform: rotate(180deg); }
 
   .select-dropdown {
     position: absolute;
     top: calc(100% + 4px);
-    left: 0;
-    right: 0;
+    left: 0; right: 0;
     background: white;
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -110,9 +100,8 @@
     z-index: 1000;
     display: none;
     flex-direction: column;
-    max-height: 320px;
+    max-height: 280px;
   }
-
   .select-dropdown.open { display: flex; }
 
   .select-search {
@@ -125,11 +114,7 @@
     color: var(--text);
   }
 
-  .select-options {
-    overflow-y: auto;
-    flex: 1;
-    padding: 4px 0;
-  }
+  .select-options { overflow-y: auto; flex: 1; padding: 4px 0; }
 
   .select-option {
     padding: 9px 14px;
@@ -141,9 +126,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
   .select-option:hover { background: var(--accent-light); color: var(--accent); }
-  .select-option.selected { background: var(--accent-light); color: var(--accent); font-weight: 600; }
   .select-option.placeholder { color: var(--text-muted); font-style: italic; }
 
   .scope-indicator {
@@ -157,9 +140,80 @@
     word-break: break-word;
   }
 
+  /* ── File list ── */
+  .file-list-section {
+    margin-top: 12px;
+    display: none;
+  }
+
+  .file-list-label {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .file-count {
+    font-size: 10px;
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .file-search {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    outline: none;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .file-search:focus { border-color: var(--accent); }
+
+  .file-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .file-item {
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .file-item:last-child { border-bottom: none; }
+  .file-item:hover { background: var(--accent-light); color: var(--accent); }
+  .file-item.selected { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+  .file-item .file-icon { font-size: 14px; flex-shrink: 0; }
+  .file-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .clear-file-btn {
+    margin-top: 6px;
+    width: 100%;
+    padding: 6px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: none;
+  }
+  .clear-file-btn:hover { border-color: var(--accent); color: var(--accent); }
+
   .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
   .new-chat-btn {
@@ -187,6 +241,7 @@
     border-bottom: 1px solid var(--border);
     background: white;
     display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
   }
   .chat-header h1 { font-size: 16px; font-weight: 600; }
   .status-dot { width: 8px; height: 8px; background: #10B981; border-radius: 50%; }
@@ -241,7 +296,6 @@
     cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none;
   }
   .sources-toggle:hover { text-decoration: underline; }
-
   .sources-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
   .source-item { padding: 8px 12px; background: white; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
   .source-name { font-weight: 600; color: var(--text); }
@@ -256,7 +310,7 @@
   .dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
 
-  .input-area { padding: 16px 24px 20px; background: white; border-top: 1px solid var(--border); }
+  .input-area { padding: 16px 24px 20px; background: white; border-top: 1px solid var(--border); flex-shrink: 0; }
   .input-wrapper {
     display: flex; align-items: flex-end; gap: 10px;
     background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
@@ -333,6 +387,17 @@
     <div class="scope-indicator" id="scope-indicator">
       🌐 Searching all Fuse Power Management documents
     </div>
+
+    <!-- File list -->
+    <div class="file-list-section" id="file-list-section">
+      <div class="file-list-label">
+        <span>Files in folder</span>
+        <span class="file-count" id="file-count">0</span>
+      </div>
+      <input class="file-search" id="file-search" placeholder="Search files..." oninput="filterFiles(this.value)">
+      <div class="file-list" id="file-list"></div>
+      <button class="clear-file-btn" id="clear-file-btn" onclick="clearSelectedFile()">✕ Clear file filter</button>
+    </div>
   </div>
 
   <div class="sidebar-footer">
@@ -350,7 +415,7 @@
     <div class="empty-state" id="empty-state">
       <div class="empty-icon">🔍</div>
       <div class="empty-title">Ask anything about Fuse documents</div>
-      <div class="empty-sub">Search across all project folders or narrow your scope using the sidebar.</div>
+      <div class="empty-sub">Select a folder to scope your search, then pick a specific file or ask broadly.</div>
       <div class="suggestions">
         <div class="suggestion-chip" onclick="sendSuggestion('Who are Fuse\'s partners in the BC Hydro RFP?')">BC Hydro RFP partners</div>
         <div class="suggestion-chip" onclick="sendSuggestion('What is the e-Auto Challenge about?')">e-Auto Challenge</div>
@@ -380,14 +445,15 @@ const API = 'https://fuse-ai-assistant.onrender.com';
 let folderTree = {};
 let messages = [];
 let currentFolder = null;
+let selectedFile = null;
 let selectedL1 = null, selectedL2 = null, selectedL3 = null;
+let allFiles = [];
 
-// Close dropdowns when clicking outside
 document.addEventListener('click', (e) => {
   ['l1','l2','l3'].forEach(level => {
     const dd = document.getElementById(`dropdown-${level}`);
     const trigger = document.getElementById(`trigger-${level}`);
-    if (dd && !dd.contains(e.target) && !trigger.contains(e.target)) {
+    if (dd && !dd.contains(e.target) && trigger && !trigger.contains(e.target)) {
       dd.classList.remove('open');
       trigger.classList.remove('open');
     }
@@ -398,7 +464,6 @@ function toggleDropdown(level) {
   const dd = document.getElementById(`dropdown-${level}`);
   const trigger = document.getElementById(`trigger-${level}`);
   const isOpen = dd.classList.contains('open');
-  // close all
   ['l1','l2','l3'].forEach(l => {
     document.getElementById(`dropdown-${l}`).classList.remove('open');
     document.getElementById(`trigger-${l}`).classList.remove('open');
@@ -423,21 +488,11 @@ function filterOptions(level, query) {
 function buildOptions(level, items, onSelect) {
   const container = document.getElementById(`options-${level}`);
   container.innerHTML = '';
-
-  if (level !== 'l1') {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'select-option placeholder';
-    placeholder.textContent = '— All in this folder —';
-    placeholder.onclick = () => onSelect(null);
-    container.appendChild(placeholder);
-  } else {
-    const all = document.createElement('div');
-    all.className = 'select-option placeholder';
-    all.textContent = 'All Fuse Power Management';
-    all.onclick = () => onSelect(null);
-    container.appendChild(all);
-  }
-
+  const placeholder = document.createElement('div');
+  placeholder.className = 'select-option placeholder';
+  placeholder.textContent = level === 'l1' ? 'All Fuse Power Management' : '— All in this folder —';
+  placeholder.onclick = () => onSelect(null);
+  container.appendChild(placeholder);
   items.sort().forEach(item => {
     const div = document.createElement('div');
     div.className = 'select-option';
@@ -471,19 +526,79 @@ function buildTree(folders) {
   }
 }
 
+async function loadFiles(folderPath) {
+  try {
+    const url = folderPath ? `${API}/files?folder_path=${encodeURIComponent(folderPath)}` : `${API}/files`;
+    const res = await fetch(url);
+    const data = await res.json();
+    allFiles = data.files || [];
+    renderFiles(allFiles);
+    document.getElementById('file-list-section').style.display = 'block';
+    document.getElementById('file-count').textContent = allFiles.length;
+    document.getElementById('file-search').value = '';
+  } catch(e) {
+    console.error('Could not load files:', e);
+  }
+}
+
+function renderFiles(files) {
+  const container = document.getElementById('file-list');
+  container.innerHTML = '';
+
+  if (files.length === 0) {
+    container.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center">No files found</div>';
+    return;
+  }
+
+  files.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'file-item' + (selectedFile && selectedFile.filename === f.filename && selectedFile.folder_path === f.folder_path ? ' selected' : '');
+
+    const ext = f.filename.split('.').pop().toLowerCase();
+    const icon = ext === 'pdf' ? '📄' : ext === 'docx' ? '📝' : ext === 'xlsx' || ext === 'xls' ? '📊' : '📁';
+
+    div.innerHTML = `<span class="file-icon">${icon}</span><span class="file-name">${f.filename}</span>`;
+    div.onclick = () => selectFile(f);
+    container.appendChild(div);
+  });
+}
+
+function filterFiles(query) {
+  const q = query.toLowerCase();
+  const filtered = allFiles.filter(f => f.filename.toLowerCase().includes(q));
+  renderFiles(filtered);
+}
+
+function selectFile(file) {
+  selectedFile = file;
+  currentFolder = file.folder_path;
+  updateScope();
+  renderFiles(allFiles);
+  document.getElementById('clear-file-btn').style.display = 'block';
+}
+
+function clearSelectedFile() {
+  selectedFile = null;
+  updateScope();
+  renderFiles(allFiles);
+  document.getElementById('clear-file-btn').style.display = 'none';
+}
+
 function selectL1(value) {
   selectedL1 = value;
   selectedL2 = null;
   selectedL3 = null;
+  selectedFile = null;
 
   document.getElementById('text-l1').textContent = value || 'All Fuse Power Management';
   document.getElementById('dropdown-l1').classList.remove('open');
   document.getElementById('trigger-l1').classList.remove('open');
-
   document.getElementById('cs-l2').style.display = 'none';
   document.getElementById('cs-l3').style.display = 'none';
   document.getElementById('text-l2').textContent = '— All in this folder —';
   document.getElementById('text-l3').textContent = '— All in this folder —';
+  document.getElementById('file-list-section').style.display = 'none';
+  document.getElementById('clear-file-btn').style.display = 'none';
 
   if (value) {
     currentFolder = `Fuse Power Management/${value}`;
@@ -493,8 +608,10 @@ function selectL1(value) {
       buildOptions('l2', subs, selectL2);
       document.getElementById('cs-l2').style.display = 'block';
     }
+    loadFiles(currentFolder);
   } else {
     currentFolder = null;
+    document.getElementById('file-list-section').style.display = 'none';
   }
   updateScope();
 }
@@ -502,12 +619,14 @@ function selectL1(value) {
 function selectL2(value) {
   selectedL2 = value;
   selectedL3 = null;
+  selectedFile = null;
 
   document.getElementById('text-l2').textContent = value || '— All in this folder —';
   document.getElementById('dropdown-l2').classList.remove('open');
   document.getElementById('trigger-l2').classList.remove('open');
   document.getElementById('cs-l3').style.display = 'none';
   document.getElementById('text-l3').textContent = '— All in this folder —';
+  document.getElementById('clear-file-btn').style.display = 'none';
 
   if (value) {
     currentFolder = `Fuse Power Management/${selectedL1}/${value}`;
@@ -517,27 +636,34 @@ function selectL2(value) {
       buildOptions('l3', subs, selectL3);
       document.getElementById('cs-l3').style.display = 'block';
     }
+    loadFiles(currentFolder);
   } else {
     currentFolder = `Fuse Power Management/${selectedL1}`;
+    loadFiles(currentFolder);
   }
   updateScope();
 }
 
 function selectL3(value) {
   selectedL3 = value;
+  selectedFile = null;
   document.getElementById('text-l3').textContent = value || '— All in this folder —';
   document.getElementById('dropdown-l3').classList.remove('open');
   document.getElementById('trigger-l3').classList.remove('open');
+  document.getElementById('clear-file-btn').style.display = 'none';
 
   currentFolder = value
     ? `Fuse Power Management/${selectedL1}/${selectedL2}/${value}`
     : `Fuse Power Management/${selectedL1}/${selectedL2}`;
+  loadFiles(currentFolder);
   updateScope();
 }
 
 function updateScope() {
   const el = document.getElementById('scope-indicator');
-  if (!currentFolder) {
+  if (selectedFile) {
+    el.innerHTML = `📄 File: <strong>${selectedFile.filename}</strong>`;
+  } else if (!currentFolder) {
     el.textContent = '🌐 Searching all Fuse Power Management documents';
   } else {
     const display = currentFolder.replace('Fuse Power Management/', '');
@@ -545,7 +671,6 @@ function updateScope() {
   }
 }
 
-// ── Chat ──
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
@@ -574,12 +699,18 @@ async function sendMessage() {
   const thinkingId = addThinking();
   document.getElementById('send-btn').disabled = true;
 
+  // If a specific file is selected, add it to the question
+  let question = text;
+  if (selectedFile) {
+    question = `Regarding the file "${selectedFile.filename}": ${text}`;
+  }
+
   try {
     const res = await fetch(`${API}/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        question: text,
+        question: question,
         folder_path: currentFolder || null,
         history: messages.slice(-6)
       })
@@ -665,15 +796,12 @@ function addThinking() {
   const div = document.createElement('div');
   div.className = 'message ai';
   div.id = id;
-
   const avatar = document.createElement('div');
   avatar.className = 'avatar ai';
   avatar.textContent = '⚡';
-
   const thinking = document.createElement('div');
   thinking.className = 'thinking';
   thinking.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-
   div.appendChild(avatar);
   div.appendChild(thinking);
   container.appendChild(div);
@@ -688,12 +816,16 @@ function removeThinking(id) {
 
 function newConversation() {
   messages = [];
+  selectedFile = null;
+  document.getElementById('clear-file-btn').style.display = 'none';
+  updateScope();
+  if (allFiles.length > 0) renderFiles(allFiles);
   const container = document.getElementById('messages');
   container.innerHTML = `
     <div class="empty-state" id="empty-state">
       <div class="empty-icon">🔍</div>
       <div class="empty-title">Ask anything about Fuse documents</div>
-      <div class="empty-sub">Search across all project folders or narrow your scope using the sidebar.</div>
+      <div class="empty-sub">Select a folder to scope your search, then pick a specific file or ask broadly.</div>
       <div class="suggestions">
         <div class="suggestion-chip" onclick="sendSuggestion('Who are Fuse\\'s partners in the BC Hydro RFP?')">BC Hydro RFP partners</div>
         <div class="suggestion-chip" onclick="sendSuggestion('What is the e-Auto Challenge about?')">e-Auto Challenge</div>

@@ -227,6 +227,35 @@ def get_folders():
     ))
     return {"folders": folders}
 
+    
+@app.get("/files")
+def get_files(folder_path: str = None):
+    results = qdrant.scroll(
+        collection_name=COLLECTION_NAME,
+        limit=10000,
+        with_payload=True
+    )
+    
+    files = {}
+    for point in results[0]:
+        fp = point.payload.get("folder_path", "")
+        fn = point.payload.get("filename", "")
+        
+        # filter by folder if specified
+        if folder_path and not fp.startswith(folder_path):
+            continue
+            
+        if fn and fp:
+            key = f"{fp}/{fn}"
+            if key not in files:
+                files[key] = {
+                    "filename": fn,
+                    "folder_path": fp
+                }
+    
+    return {"files": sorted(files.values(), key=lambda x: x["filename"])}
+
+
 @app.post("/query")
 def query(request: QueryRequest):
     result = generate_answer(
