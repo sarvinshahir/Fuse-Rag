@@ -75,7 +75,7 @@ def maybe_refresh_token(msal_app, token, token_time):
         return new_token, time.time()
     return token, token_time
 
-# ── Delta sync — get only changed files ───────────────────
+# ── Delta sync ────────────────────────────────────────────
 def get_delta_changes(token, user_id, delta_token):
     headers = {"Authorization": f"Bearer {token}"}
     url = f"https://graph.microsoft.com/v1.0/users/{user_id}/drive/root/delta?token={delta_token}"
@@ -110,7 +110,7 @@ def get_delta_changes(token, user_id, delta_token):
 
     return changed, deleted, new_delta_token
 
-# ── Full scan — used when no delta token exists ───────────
+# ── OneDrive navigation ───────────────────────────────────
 def get_folder_id(token, folder_name, user_id, parent_id="root"):
     headers = {"Authorization": f"Bearer {token}"}
     url = f"https://graph.microsoft.com/v1.0/users/{user_id}/drive/items/{parent_id}/children"
@@ -228,10 +228,20 @@ def setup_collection():
         print(f"Created collection: {COLLECTION_NAME}")
     else:
         print(f"Collection already exists: {COLLECTION_NAME}")
+
     try:
         qdrant.create_payload_index(
             collection_name=COLLECTION_NAME,
             field_name="folder_path",
+            field_schema=PayloadSchemaType.TEXT
+        )
+    except Exception:
+        pass
+
+    try:
+        qdrant.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="filename",
             field_schema=PayloadSchemaType.TEXT
         )
     except Exception:
@@ -251,7 +261,7 @@ def delete_file_vectors(file_id):
     except Exception as e:
         print(f"  Could not delete vectors: {e}")
 
-# ── Process a list of files ───────────────────────────────
+# ── Process files ─────────────────────────────────────────
 def process_files(files, token, user_id, msal_app, token_time):
     ingested = load_ingested()
     to_process = [f for f in files if f["id"] not in ingested]
@@ -308,28 +318,23 @@ def ingest():
     delta_token = load_delta_token()
 
     if delta_token:
-        # ── Delta sync mode ───────────────────────────────
         print("Delta token found — running incremental sync...")
         changed, deleted, new_delta_token = get_delta_changes(token, user_id, delta_token)
 
         print(f"Changed/new files: {len(changed)}")
         print(f"Deleted files: {len(deleted)}")
 
-        # Remove deleted files from Qdrant
         for file_id in deleted:
             delete_file_vectors(file_id)
 
-        # Process changed/new files
         if changed:
             token, token_time = process_files(changed, token, user_id, msal_app, token_time)
 
-        # Save new delta token
         if new_delta_token:
             save_delta_token(new_delta_token)
             print("Delta token updated.")
 
     else:
-        # ── Full scan mode (first time) ───────────────────
         print("No delta token — running full scan...")
         parent_id = "root"
         if ONEDRIVE_PARENT:
@@ -351,8 +356,7 @@ def ingest():
 
         token, token_time = process_files(files, token, user_id, msal_app, token_time)
 
-        # Get and save delta token after full scan
-        print("Saving delta token for future incremental syncs...")
+        print("Saving delta token...")
         _, _, new_delta_token = get_delta_changes(token, user_id, "")
         if new_delta_token:
             save_delta_token(new_delta_token)
