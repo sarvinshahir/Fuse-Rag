@@ -242,7 +242,7 @@ def setup_collection():
         qdrant.create_payload_index(
             collection_name=COLLECTION_NAME,
             field_name="filename",
-            field_schema=PayloadSchemaType.TEXT
+            field_schema=PayloadSchemaType.KEYWORD
         )
     except Exception:
         pass
