@@ -731,6 +731,7 @@ async function sendMessage() {
       body: JSON.stringify({
         question: question,
         folder_path: currentFolder || null,
+        selected_file: selectedFile ? selectedFile.filename : null,
         history: messages.slice(-6)
       })
     });
