@@ -1,5 +1,7 @@
 import os
 import secrets
+import sqlite3
+from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -30,24 +32,75 @@ qdrant = QdrantClient(
 
 COLLECTION_NAME = "fuse-knowledge"
 TOP_K = 15
+DB_PATH = "/data/conversations.db"
+
+# ── Users ─────────────────────────────────────────────────
+USERS = {
+    "rob": os.getenv("UI_PASSWORD", "fuse2026"),
+    "bryan": os.getenv("UI_PASSWORD", "fuse2026"),
+    "shimei": os.getenv("UI_PASSWORD", "fuse2026"),
+    "haowen": os.getenv("UI_PASSWORD", "fuse2026"),
+    "sarvin": os.getenv("UI_PASSWORD", "fuse2026"),
+}
 
 security = HTTPBasic()
 
 def verify_password(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(
-        credentials.username.encode("utf8"),
-        "fuse".encode("utf8")
-    )
-    correct_password = secrets.compare_digest(
-        credentials.password.encode("utf8"),
-        os.getenv("UI_PASSWORD", "fuse2026").encode("utf8")
-    )
-    if not (correct_username and correct_password):
+    username = credentials.username.lower()
+    if username not in USERS:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
+    correct_password = secrets.compare_digest(
+        credentials.password.encode("utf8"),
+        USERS[username].encode("utf8")
+    )
+    if not correct_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return username
+
+# ── SQLite setup ──────────────────────────────────────────
+def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            folder_path TEXT,
+            sources TEXT,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def log_conversation(username, question, answer, folder_path, sources):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO conversations (username, question, answer, folder_path, sources, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            username,
+            question,
+            answer,
+            folder_path or "",
+            str([s["filename"] for s in sources]),
+            datetime.utcnow().isoformat()
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Logging error: {e}")
 
 # ── Request model ─────────────────────────────────────────
 class Message(BaseModel):
@@ -107,10 +160,8 @@ def is_search_query(message):
 def rewrite_query(question, history):
     if not history:
         return question
-
     recent = history[-4:]
     history_text = "\n".join([f"{m.role}: {m.content}" for m in recent])
-
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{
@@ -204,13 +255,18 @@ Answer:"""
         "sources": sources
     }
 
+# ── Startup ───────────────────────────────────────────────
+@app.on_event("startup")
+def startup():
+    init_db()
+
 # ── Endpoints ─────────────────────────────────────────────
 @app.get("/")
 def root():
     return {"status": "Fuse AI Knowledge Assistant is running"}
 
 @app.get("/ui")
-def serve_ui(credentials: HTTPBasicCredentials = Depends(verify_password)):
+def serve_ui(username: str = Depends(verify_password)):
     return FileResponse(os.path.join(os.path.dirname(__file__), "app.html"))
 
 @app.get("/folders")
@@ -227,7 +283,10 @@ def get_folders():
     ))
     return {"folders": folders}
 
-    
+@app.get("/me")
+def get_me(username: str = Depends(verify_password)):
+    return {"username": username}
+
 @app.get("/files")
 def get_files(folder_path: str = None):
     results = qdrant.scroll(
@@ -235,16 +294,15 @@ def get_files(folder_path: str = None):
         limit=10000,
         with_payload=True
     )
-    
+
     files = {}
     for point in results[0]:
         fp = point.payload.get("folder_path", "")
         fn = point.payload.get("filename", "")
-        
-        # filter by folder if specified
+
         if folder_path and not fp.startswith(folder_path):
             continue
-            
+
         if fn and fp:
             key = f"{fp}/{fn}"
             if key not in files:
@@ -252,15 +310,33 @@ def get_files(folder_path: str = None):
                     "filename": fn,
                     "folder_path": fp
                 }
-    
+
     return {"files": sorted(files.values(), key=lambda x: x["filename"])}
 
-
 @app.post("/query")
-def query(request: QueryRequest):
+def query(request: QueryRequest, username: str = Depends(verify_password)):
     result = generate_answer(
         request.question,
         request.folder_path,
         request.history
     )
+    log_conversation(
+        username=username,
+        question=request.question,
+        answer=result["answer"],
+        folder_path=request.folder_path,
+        sources=result["sources"]
+    )
     return result
+
+@app.get("/logs")
+def get_logs(username: str = Depends(verify_password)):
+    if username != "sarvin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM conversations ORDER BY timestamp DESC LIMIT 100"
+    ).fetchall()
+    conn.close()
+    return {"conversations": [dict(r) for r in rows]}

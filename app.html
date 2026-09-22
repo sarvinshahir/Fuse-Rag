@@ -54,6 +54,19 @@
   }
   .logo-text { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
   .logo-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .user-badge {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .user-badge span {
+    color: var(--accent);
+    font-weight: 600;
+    text-transform: capitalize;
+  }
 
   .sidebar-content {
     padding: 16px;
@@ -140,11 +153,7 @@
     word-break: break-word;
   }
 
-  /* ── File list ── */
-  .file-list-section {
-    margin-top: 12px;
-    display: none;
-  }
+  .file-list-section { margin-top: 12px; display: none; }
 
   .file-list-label {
     font-size: 11px; font-weight: 600; color: var(--text-muted);
@@ -233,7 +242,6 @@
   }
   .new-chat-btn:hover { background: var(--bg); }
 
-  /* ── Main ── */
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
   .chat-header {
@@ -343,6 +351,7 @@
         <div class="logo-sub">Knowledge Search</div>
       </div>
     </div>
+    <div class="user-badge">Logged in as <span id="user-display">...</span></div>
   </div>
 
   <div class="sidebar-content">
@@ -388,7 +397,6 @@
       🌐 Searching all Fuse Power Management documents
     </div>
 
-    <!-- File list -->
     <div class="file-list-section" id="file-list-section">
       <div class="file-list-label">
         <span>Files in folder</span>
@@ -448,7 +456,21 @@ let currentFolder = null;
 let selectedFile = null;
 let selectedL1 = null, selectedL2 = null, selectedL3 = null;
 let allFiles = [];
+let currentUser = null;
 
+// ── Init user ─────────────────────────────────────────────
+async function initUser() {
+  try {
+    const res = await fetch(`${API}/me`, { credentials: 'include' });
+    const data = await res.json();
+    currentUser = data.username;
+    document.getElementById('user-display').textContent = currentUser;
+  } catch(e) {
+    console.error('Could not get user:', e);
+  }
+}
+
+// ── Dropdown ──────────────────────────────────────────────
 document.addEventListener('click', (e) => {
   ['l1','l2','l3'].forEach(level => {
     const dd = document.getElementById(`dropdown-${level}`);
@@ -504,7 +526,7 @@ function buildOptions(level, items, onSelect) {
 
 async function loadFolders() {
   try {
-    const res = await fetch(`${API}/folders`);
+    const res = await fetch(`${API}/folders`, { credentials: 'include' });
     const data = await res.json();
     buildTree(data.folders || []);
     const fpm = folderTree['Fuse Power Management'] || {};
@@ -528,8 +550,10 @@ function buildTree(folders) {
 
 async function loadFiles(folderPath) {
   try {
-    const url = folderPath ? `${API}/files?folder_path=${encodeURIComponent(folderPath)}` : `${API}/files`;
-    const res = await fetch(url);
+    const url = folderPath
+      ? `${API}/files?folder_path=${encodeURIComponent(folderPath)}`
+      : `${API}/files`;
+    const res = await fetch(url, { credentials: 'include' });
     const data = await res.json();
     allFiles = data.files || [];
     renderFiles(allFiles);
@@ -544,19 +568,15 @@ async function loadFiles(folderPath) {
 function renderFiles(files) {
   const container = document.getElementById('file-list');
   container.innerHTML = '';
-
   if (files.length === 0) {
     container.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center">No files found</div>';
     return;
   }
-
   files.forEach(f => {
     const div = document.createElement('div');
     div.className = 'file-item' + (selectedFile && selectedFile.filename === f.filename && selectedFile.folder_path === f.folder_path ? ' selected' : '');
-
     const ext = f.filename.split('.').pop().toLowerCase();
     const icon = ext === 'pdf' ? '📄' : ext === 'docx' ? '📝' : ext === 'xlsx' || ext === 'xls' ? '📊' : '📁';
-
     div.innerHTML = `<span class="file-icon">${icon}</span><span class="file-name">${f.filename}</span>`;
     div.onclick = () => selectFile(f);
     container.appendChild(div);
@@ -589,7 +609,6 @@ function selectL1(value) {
   selectedL2 = null;
   selectedL3 = null;
   selectedFile = null;
-
   document.getElementById('text-l1').textContent = value || 'All Fuse Power Management';
   document.getElementById('dropdown-l1').classList.remove('open');
   document.getElementById('trigger-l1').classList.remove('open');
@@ -599,7 +618,6 @@ function selectL1(value) {
   document.getElementById('text-l3').textContent = '— All in this folder —';
   document.getElementById('file-list-section').style.display = 'none';
   document.getElementById('clear-file-btn').style.display = 'none';
-
   if (value) {
     currentFolder = `Fuse Power Management/${value}`;
     const fpm = folderTree['Fuse Power Management'] || {};
@@ -620,14 +638,12 @@ function selectL2(value) {
   selectedL2 = value;
   selectedL3 = null;
   selectedFile = null;
-
   document.getElementById('text-l2').textContent = value || '— All in this folder —';
   document.getElementById('dropdown-l2').classList.remove('open');
   document.getElementById('trigger-l2').classList.remove('open');
   document.getElementById('cs-l3').style.display = 'none';
   document.getElementById('text-l3').textContent = '— All in this folder —';
   document.getElementById('clear-file-btn').style.display = 'none';
-
   if (value) {
     currentFolder = `Fuse Power Management/${selectedL1}/${value}`;
     const fpm = folderTree['Fuse Power Management'] || {};
@@ -651,7 +667,6 @@ function selectL3(value) {
   document.getElementById('dropdown-l3').classList.remove('open');
   document.getElementById('trigger-l3').classList.remove('open');
   document.getElementById('clear-file-btn').style.display = 'none';
-
   currentFolder = value
     ? `Fuse Power Management/${selectedL1}/${selectedL2}/${value}`
     : `Fuse Power Management/${selectedL1}/${selectedL2}`;
@@ -671,6 +686,7 @@ function updateScope() {
   }
 }
 
+// ── Chat ──────────────────────────────────────────────────
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
@@ -691,7 +707,10 @@ async function sendMessage() {
   if (!text) return;
 
   hideEmptyState();
-  addMessage('user', text);
+
+  const displayName = currentUser || 'You';
+  const initials = displayName.charAt(0).toUpperCase();
+  addMessage('user', text, [], initials);
   messages.push({ role: 'user', content: text });
   input.value = '';
   input.style.height = 'auto';
@@ -699,7 +718,6 @@ async function sendMessage() {
   const thinkingId = addThinking();
   document.getElementById('send-btn').disabled = true;
 
-  // If a specific file is selected, add it to the question
   let question = text;
   if (selectedFile) {
     question = `Regarding the file "${selectedFile.filename}": ${text}`;
@@ -709,6 +727,7 @@ async function sendMessage() {
     const res = await fetch(`${API}/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         question: question,
         folder_path: currentFolder || null,
@@ -734,14 +753,14 @@ function hideEmptyState() {
   if (el) el.remove();
 }
 
-function addMessage(role, text, sources) {
+function addMessage(role, text, sources, initials) {
   const container = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = `message ${role}`;
 
   const avatar = document.createElement('div');
   avatar.className = `avatar ${role}`;
-  avatar.textContent = role === 'user' ? 'S' : '⚡';
+  avatar.textContent = role === 'user' ? (initials || 'S') : '⚡';
 
   const bubble = document.createElement('div');
   bubble.className = `bubble ${role}`;
@@ -751,11 +770,9 @@ function addMessage(role, text, sources) {
     const toggle = document.createElement('div');
     toggle.className = 'sources-toggle';
     toggle.innerHTML = `▸ ${sources.length} source${sources.length > 1 ? 's' : ''}`;
-
     const list = document.createElement('div');
     list.className = 'sources-list';
     list.style.display = 'none';
-
     sources.forEach(s => {
       const item = document.createElement('div');
       item.className = 'source-item';
@@ -763,13 +780,11 @@ function addMessage(role, text, sources) {
       item.innerHTML = `<div class="source-name">${s.filename}</div><div class="source-path">${path}</div>`;
       list.appendChild(item);
     });
-
     toggle.onclick = () => {
       const open = list.style.display !== 'none';
       list.style.display = open ? 'none' : 'flex';
       toggle.innerHTML = `${open ? '▸' : '▾'} ${sources.length} source${sources.length > 1 ? 's' : ''}`;
     };
-
     bubble.appendChild(toggle);
     bubble.appendChild(list);
   }
@@ -835,7 +850,8 @@ function newConversation() {
     </div>`;
 }
 
-loadFolders();
+// ── Init ──────────────────────────────────────────────────
+initUser().then(() => loadFolders());
 </script>
 </body>
 </html>
