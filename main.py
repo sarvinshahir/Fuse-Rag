@@ -76,6 +76,7 @@ def init_db():
             question TEXT NOT NULL,
             answer TEXT NOT NULL,
             folder_path TEXT,
+            selected_file TEXT,
             sources TEXT,
             timestamp TEXT NOT NULL
         )
@@ -83,17 +84,18 @@ def init_db():
     conn.commit()
     conn.close()
 
-def log_conversation(username, question, answer, folder_path, sources):
+def log_conversation(username, question, answer, folder_path, selected_file, sources):
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("""
-            INSERT INTO conversations (username, question, answer, folder_path, sources, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO conversations (username, question, answer, folder_path, selected_file, sources, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             username,
             question,
             answer,
             folder_path or "",
+            selected_file or "",
             str([s["filename"] for s in sources]),
             datetime.utcnow().isoformat()
         ))
@@ -110,6 +112,7 @@ class Message(BaseModel):
 class QueryRequest(BaseModel):
     question: str
     folder_path: Optional[str] = None
+    selected_file: Optional[str] = None
     history: Optional[List[Message]] = []
 
 # ── Embed query ───────────────────────────────────────────
@@ -121,19 +124,22 @@ def embed_query(text):
     return response.data[0].embedding
 
 # ── Search Qdrant ─────────────────────────────────────────
-def search(query_text, folder_path=None):
+def search(query_text, folder_path=None, selected_file=None):
     query_vector = embed_query(query_text)
 
-    search_filter = None
+    must_conditions = []
+
     if folder_path:
-        search_filter = Filter(
-            must=[
-                FieldCondition(
-                    key="folder_path",
-                    match=MatchText(text=folder_path)
-                )
-            ]
+        must_conditions.append(
+            FieldCondition(key="folder_path", match=MatchText(text=folder_path))
         )
+
+    if selected_file:
+        must_conditions.append(
+            FieldCondition(key="filename", match=MatchText(text=selected_file))
+        )
+
+    search_filter = Filter(must=must_conditions) if must_conditions else None
 
     results = qdrant.query_points(
         collection_name=COLLECTION_NAME,
@@ -173,7 +179,7 @@ def rewrite_query(question, history):
     return response.choices[0].message.content.strip()
 
 # ── Generate answer ───────────────────────────────────────
-def generate_answer(query_text, folder_path=None, history=None):
+def generate_answer(query_text, folder_path=None, selected_file=None, history=None):
     if history is None:
         history = []
 
@@ -192,7 +198,7 @@ def generate_answer(query_text, folder_path=None, history=None):
         }
 
     search_query = rewrite_query(query_text, history) if history else query_text
-    results = search(search_query, folder_path)
+    results = search(search_query, folder_path, selected_file)
 
     if not results:
         return {
@@ -265,6 +271,18 @@ def startup():
 def root():
     return {"status": "Fuse AI Knowledge Assistant is running"}
 
+@app.get("/logout")
+def logout():
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Logged out",
+        headers={"WWW-Authenticate": "Basic"},
+    )
+
+@app.get("/me")
+def get_me(username: str = Depends(verify_password)):
+    return {"username": username}
+
 @app.get("/ui")
 def serve_ui(username: str = Depends(verify_password)):
     return FileResponse(os.path.join(os.path.dirname(__file__), "app.html"))
@@ -282,10 +300,6 @@ def get_folders():
         if point.payload.get("folder_path")
     ))
     return {"folders": folders}
-
-@app.get("/me")
-def get_me(username: str = Depends(verify_password)):
-    return {"username": username}
 
 @app.get("/files")
 def get_files(folder_path: str = None):
@@ -318,6 +332,7 @@ def query(request: QueryRequest, username: str = Depends(verify_password)):
     result = generate_answer(
         request.question,
         request.folder_path,
+        request.selected_file,
         request.history
     )
     log_conversation(
@@ -325,6 +340,7 @@ def query(request: QueryRequest, username: str = Depends(verify_password)):
         question=request.question,
         answer=result["answer"],
         folder_path=request.folder_path,
+        selected_file=request.selected_file,
         sources=result["sources"]
     )
     return result
