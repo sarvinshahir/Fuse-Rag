@@ -13,3 +13,6 @@ __pycache__/
 # Streamlit cache
 .streamlit/
 ingested_files.txt
+
+
+delta_token.txt

@@ -774,12 +774,16 @@ function addMessage(role, text, sources, initials) {
     const list = document.createElement('div');
     list.className = 'sources-list';
     list.style.display = 'none';
+    const seenSources = new Set();
     sources.forEach(s => {
-      const item = document.createElement('div');
-      item.className = 'source-item';
-      const path = s.folder_path.replace('Fuse Power Management/', '');
-      item.innerHTML = `<div class="source-name">${s.filename}</div><div class="source-path">${path}</div>`;
-      list.appendChild(item);
+        const key = `${s.filename}|${s.folder_path}`;
+        if (seenSources.has(key)) return;
+        seenSources.add(key);
+        const item = document.createElement('div');
+        item.className = 'source-item';
+        const path = s.folder_path.replace('Fuse Power Management/', '');
+        item.innerHTML = `<div class="source-name">${s.filename}</div><div class="source-path">${path}</div>`;
+        list.appendChild(item);
     });
     toggle.onclick = () => {
       const open = list.style.display !== 'none';
