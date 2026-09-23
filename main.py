@@ -150,6 +150,38 @@ def search(query_text, folder_path=None, selected_file=None):
     ).points
     return results
 
+# ── Detect overview question ──────────────────────────────
+def is_overview_question(question):
+    overview_phrases = [
+        "what's in this file", "what is in this file", "whats in this file",
+        "summarize this file", "summarize this", "what does this file contain",
+        "overview of this file", "what are the sheets", "explain this file",
+        "what is this file about", "give me an overview", "what info is here",
+        "what information is here", "contents of this file", "what is in here",
+        "what's in here", "whats in here", "tell me about this file",
+        "describe this file", "what does this contain"
+    ]
+    q = question.lower().strip()
+    return any(phrase in q for phrase in overview_phrases)
+
+# ── Fetch all chunks from a file ──────────────────────────
+def fetch_all_file_chunks(filename, folder_path=None):
+    must_conditions = [
+        FieldCondition(key="filename", match=MatchValue(value=filename))
+    ]
+    if folder_path:
+        must_conditions.append(
+            FieldCondition(key="folder_path", match=MatchText(text=folder_path))
+        )
+
+    results, _ = qdrant.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(must=must_conditions),
+        limit=200,
+        with_payload=True
+    )
+    return results
+
 # ── Detect intent ─────────────────────────────────────────
 def is_search_query(message):
     response = openai_client.chat.completions.create(
@@ -197,8 +229,13 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
             "sources": []
         }
 
-    search_query = rewrite_query(query_text, history) if history else query_text
-    results = search(search_query, folder_path, selected_file)
+    # Use full-file retrieval for overview questions
+    if selected_file and is_overview_question(query_text):
+        results = fetch_all_file_chunks(selected_file, folder_path)
+        print(f"Overview mode: fetched {len(results)} chunks from {selected_file}")
+    else:
+        search_query = rewrite_query(query_text, history) if history else query_text
+        results = search(search_query, folder_path, selected_file)
 
     if not results:
         return {
@@ -233,14 +270,28 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
     for m in history[-6:]:
         messages.append({"role": m.role, "content": m.content})
 
-    messages.append({
-        "role": "user",
-        "content": f"""You are an AI assistant for Fuse Power Management.
+    if selected_file and is_overview_question(query_text):
+        prompt_instruction = f"""You are an AI assistant for Fuse Power Management.
+The user has selected the file "{selected_file}" and wants an overview of its contents.
+Based on ALL the context provided below (which contains chunks from the entire file), provide a comprehensive summary including:
+- What the file is about
+- Key sections or sheets
+- Important data, numbers, or findings
+- How the information is structured
+
+Do not say you could not find information — summarize everything you can see in the context.
+Do not cite source numbers for overview questions — just give a clear structured summary."""
+    else:
+        prompt_instruction = """You are an AI assistant for Fuse Power Management.
 Answer the question based on the context provided below.
 Extract and summarize any relevant information you find, even if it is partial.
 If the answer is not in the context, say you couldn't find it in the selected documents and suggest trying a different folder.
 Always cite which source number(s) you used.
-Respond in a natural, helpful tone.
+Respond in a natural, helpful tone."""
+
+    messages.append({
+        "role": "user",
+        "content": f"""{prompt_instruction}
 
 Context:
 {context}
