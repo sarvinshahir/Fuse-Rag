@@ -154,11 +154,15 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Captures the most recent logging failure so /debug/db can surface it.
+LAST_LOG_ERROR = None
+
 def log_conversation(
     username, question, answer, folder_path, selected_file, sources,
     rewritten_query=None, retrieved_chunks=None, model=None, latency_ms=None
 ):
     """Insert one evaluation-ready record and return its row id (or None on failure)."""
+    global LAST_LOG_ERROR
     try:
         retrieved_chunks = retrieved_chunks or []
         similarity_scores = [chunk.get("score") for chunk in retrieved_chunks]
@@ -196,6 +200,7 @@ def log_conversation(
         conn.close()
         return row_id
     except Exception as e:
+        LAST_LOG_ERROR = repr(e)
         print(f"Logging error: {e}")
         return None
 
@@ -505,6 +510,30 @@ def serve_ui(username: str = Depends(verify_password)):
 @app.get("/admin")
 def serve_admin(username: str = Depends(require_admin)):
     return FileResponse(os.path.join(BASE_DIR, "logs.html"))
+
+@app.get("/debug/db")
+def debug_db(username: str = Depends(require_admin)):
+    """Admin-only diagnostics: confirms which DB file is in use, its real schema,
+    row count, and the last logging error (if any)."""
+    db_dir = os.path.dirname(DB_PATH) or "."
+    info = {
+        "db_path": DB_PATH,
+        "db_dir_exists": os.path.isdir(db_dir),
+        "db_file_exists": os.path.isfile(DB_PATH),
+        "data_disk_mounted": os.path.isdir("/data"),
+        "last_log_error": LAST_LOG_ERROR,
+    }
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        info["columns"] = [
+            {"name": r[1], "type": r[2], "notnull": r[3], "default": r[4]}
+            for r in conn.execute("PRAGMA table_info(conversations)")
+        ]
+        info["row_count"] = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+        conn.close()
+    except Exception as e:
+        info["read_error"] = repr(e)
+    return info
 
 @app.get("/folders")
 def get_folders():
