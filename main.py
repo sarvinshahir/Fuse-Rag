@@ -38,13 +38,19 @@ COLLECTION_NAME = "fuse-knowledge"
 TOP_K = 15
 ANSWER_MODEL = "gpt-4o-mini"
 
-# DB_PATH is configurable so the same code runs locally and in production.
-#   • Local dev  → defaults to ./conversations.db next to this file (always writable).
-#   • Production → set env var DB_PATH=/data/conversations.db AND attach a Render
-#     persistent disk mounted at /data, otherwise the file lives on ephemeral
-#     container storage and is WIPED on every restart / redeploy / free-tier spin-down.
+# Where the SQLite conversation log lives. Resolution order:
+#   1. DB_PATH env var, if set (use this if your Render disk is mounted somewhere
+#      other than /data, e.g. DB_PATH=/var/data/conversations.db).
+#   2. /data/conversations.db — automatically used when a Render persistent disk
+#      is mounted at /data, so the data survives every redeploy/restart.
+#   3. ./conversations.db next to this file — local-dev fallback (no /data present).
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "conversations.db"))
+if os.getenv("DB_PATH"):
+    DB_PATH = os.getenv("DB_PATH")
+elif os.path.isdir("/data"):
+    DB_PATH = "/data/conversations.db"
+else:
+    DB_PATH = os.path.join(BASE_DIR, "conversations.db")
 
 # ── Users ─────────────────────────────────────────────────
 USERS = {
