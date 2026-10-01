@@ -94,6 +94,7 @@ def require_admin(username: str = Depends(verify_password)):
 # Evaluation-ready record. Columns added after the original schema are created
 # on fresh DBs here and back-filled on existing DBs by the migration below.
 NEW_COLUMNS = {
+    "selected_file": "TEXT",
     "rewritten_query": "TEXT",
     "retrieved_chunks": "TEXT",
     "source_files": "TEXT",
