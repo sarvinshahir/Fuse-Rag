@@ -1,10 +1,14 @@
 import os
 import secrets
 import sqlite3
+import json
+import csv
+import io
+import time
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from typing import Optional, List
@@ -32,7 +36,15 @@ qdrant = QdrantClient(
 
 COLLECTION_NAME = "fuse-knowledge"
 TOP_K = 15
-DB_PATH = "/data/conversations.db"
+ANSWER_MODEL = "gpt-4o-mini"
+
+# DB_PATH is configurable so the same code runs locally and in production.
+#   • Local dev  → defaults to ./conversations.db next to this file (always writable).
+#   • Production → set env var DB_PATH=/data/conversations.db AND attach a Render
+#     persistent disk mounted at /data, otherwise the file lives on ephemeral
+#     container storage and is WIPED on every restart / redeploy / free-tier spin-down.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "conversations.db"))
 
 # ── Users ─────────────────────────────────────────────────
 USERS = {
@@ -42,6 +54,8 @@ USERS = {
     "haowen": os.getenv("UI_PASSWORD", "fuse2026"),
     "sarvin": os.getenv("UI_PASSWORD", "fuse2026"),
 }
+
+ADMIN_USER = "sarvin"
 
 security = HTTPBasic()
 
@@ -65,46 +79,155 @@ def verify_password(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return username
 
+def require_admin(username: str = Depends(verify_password)):
+    if username != ADMIN_USER:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return username
+
 # ── SQLite setup ──────────────────────────────────────────
+# Evaluation-ready record. Columns added after the original schema are created
+# on fresh DBs here and back-filled on existing DBs by the migration below.
+NEW_COLUMNS = {
+    "rewritten_query": "TEXT",
+    "retrieved_chunks": "TEXT",
+    "source_files": "TEXT",
+    "similarity_scores": "TEXT",
+    "model": "TEXT",
+    "latency_ms": "INTEGER",
+    "user_feedback": "TEXT",
+    "feedback_comment": "TEXT",
+    "expected_answer": "TEXT",
+    "evaluation_status": "TEXT DEFAULT 'unreviewed'",
+}
+
+# Field order used for /logs/export (both JSONL and CSV).
+EXPORT_FIELDS = [
+    "id", "username", "question", "rewritten_query", "answer",
+    "folder_path", "selected_file", "retrieved_chunks", "source_files",
+    "similarity_scores", "model", "timestamp", "latency_ms",
+    "user_feedback", "feedback_comment", "expected_answer", "evaluation_status",
+]
+
+# Fields stored as JSON strings that should be expanded back to objects in JSONL.
+JSON_FIELDS = {"retrieved_chunks", "source_files", "similarity_scores"}
+
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
             question TEXT NOT NULL,
+            rewritten_query TEXT,
             answer TEXT NOT NULL,
             folder_path TEXT,
             selected_file TEXT,
             sources TEXT,
+            retrieved_chunks TEXT,
+            source_files TEXT,
+            similarity_scores TEXT,
+            model TEXT,
+            latency_ms INTEGER,
+            user_feedback TEXT,
+            feedback_comment TEXT,
+            expected_answer TEXT,
+            evaluation_status TEXT DEFAULT 'unreviewed',
             timestamp TEXT NOT NULL
         )
     """)
+
+    # Migrate an existing conversations table without deleting old logs.
+    existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+    for column, column_type in NEW_COLUMNS.items():
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE conversations ADD COLUMN {column} {column_type}")
+
     conn.commit()
     conn.close()
 
-def log_conversation(username, question, answer, folder_path, selected_file, sources):
+def log_conversation(
+    username, question, answer, folder_path, selected_file, sources,
+    rewritten_query=None, retrieved_chunks=None, model=None, latency_ms=None
+):
+    """Insert one evaluation-ready record and return its row id (or None on failure)."""
     try:
+        retrieved_chunks = retrieved_chunks or []
+        similarity_scores = [chunk.get("score") for chunk in retrieved_chunks]
+        # Unique source filenames, order preserved.
+        source_files = list(dict.fromkeys(
+            chunk.get("filename") for chunk in retrieved_chunks if chunk.get("filename")
+        ))
+
         conn = sqlite3.connect(DB_PATH)
-        conn.execute("""
-            INSERT INTO conversations (username, question, answer, folder_path, selected_file, sources, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+        cursor = conn.execute("""
+            INSERT INTO conversations (
+                username, question, rewritten_query, answer, folder_path,
+                selected_file, sources, retrieved_chunks, source_files,
+                similarity_scores, model, latency_ms, evaluation_status, timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             username,
             question,
+            rewritten_query or "",
             answer,
             folder_path or "",
             selected_file or "",
-            str([s["filename"] for s in sources]),
+            json.dumps(sources or [], ensure_ascii=False),
+            json.dumps(retrieved_chunks, ensure_ascii=False),
+            json.dumps(source_files, ensure_ascii=False),
+            json.dumps(similarity_scores),
+            model or "",
+            latency_ms,
+            "unreviewed",
             datetime.utcnow().isoformat()
         ))
+        row_id = cursor.lastrowid
         conn.commit()
         conn.close()
+        return row_id
     except Exception as e:
         print(f"Logging error: {e}")
+        return None
 
-# ── Request model ─────────────────────────────────────────
+# ── Export helpers (kept separate so they're testable without HTTP) ────────
+def fetch_all_rows(limit=None):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    sql = "SELECT * FROM conversations ORDER BY id DESC"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    rows = conn.execute(sql).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def rows_to_jsonl(rows):
+    lines = []
+    for r in rows:
+        record = {}
+        for field in EXPORT_FIELDS:
+            value = r.get(field)
+            if field in JSON_FIELDS and isinstance(value, str) and value:
+                try:
+                    value = json.loads(value)
+                except (ValueError, TypeError):
+                    pass
+            record[field] = value
+        lines.append(json.dumps(record, ensure_ascii=False))
+    return "\n".join(lines)
+
+def rows_to_csv(rows):
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=EXPORT_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({field: r.get(field) for field in EXPORT_FIELDS})
+    return buffer.getvalue()
+
+# ── Request models ────────────────────────────────────────
 class Message(BaseModel):
     role: str
     content: str
@@ -114,6 +237,16 @@ class QueryRequest(BaseModel):
     folder_path: Optional[str] = None
     selected_file: Optional[str] = None
     history: Optional[List[Message]] = []
+
+class FeedbackRequest(BaseModel):
+    conversation_id: int
+    feedback: Optional[str] = None   # "up" or "down"
+    comment: Optional[str] = None
+
+class EvaluationRequest(BaseModel):
+    conversation_id: int
+    expected_answer: Optional[str] = None
+    evaluation_status: Optional[str] = None
 
 # ── Embed query ───────────────────────────────────────────
 def embed_query(text):
@@ -185,7 +318,7 @@ def fetch_all_file_chunks(filename, folder_path=None):
 # ── Detect intent ─────────────────────────────────────────
 def is_search_query(message):
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=ANSWER_MODEL,
         messages=[{
             "role": "user",
             "content": f"Is this message related to finding, listing, or retrieving information from documents? This includes follow-up requests like 'more', 'list them', 'give me names', 'from the folder', 'what else', 'who else'. Reply with only 'search' or 'conversation'. Only reply 'conversation' for greetings, thanks, and clearly social messages.\n\nMessage: {message}"
@@ -201,7 +334,7 @@ def rewrite_query(question, history):
     recent = history[-4:]
     history_text = "\n".join([f"{m.role}: {m.content}" for m in recent])
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=ANSWER_MODEL,
         messages=[{
             "role": "user",
             "content": f"Given this conversation history, rewrite the latest question as a complete standalone search query that includes all necessary context.\n\nConversation:\n{history_text}\nLatest question: {question}\n\nRewritten query (just the query, nothing else):"
@@ -215,9 +348,11 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
     if history is None:
         history = []
 
+    search_query = query_text
+
     if not is_search_query(query_text):
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=ANSWER_MODEL,
             messages=[{
                 "role": "user",
                 "content": f"You are a helpful AI assistant for Fuse Power Management. Respond naturally and conversationally to this message: {query_text}"
@@ -226,11 +361,15 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
         )
         return {
             "answer": response.choices[0].message.content,
-            "sources": []
+            "sources": [],
+            "rewritten_query": search_query,
+            "retrieved_chunks": [],
+            "model": ANSWER_MODEL
         }
 
-    # Use full-file retrieval for overview questions
-    if selected_file and is_overview_question(query_text):
+    # Use full-file retrieval for overview questions.
+    overview_mode = bool(selected_file and is_overview_question(query_text))
+    if overview_mode:
         results = fetch_all_file_chunks(selected_file, folder_path)
         print(f"Overview mode: fetched {len(results)} chunks from {selected_file}")
     else:
@@ -240,11 +379,15 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
     if not results:
         return {
             "answer": "I couldn't find information about that in the selected documents. You may want to try a different folder or rephrase your question.",
-            "sources": []
+            "sources": [],
+            "rewritten_query": search_query,
+            "retrieved_chunks": [],
+            "model": ANSWER_MODEL
         }
 
     context = ""
     sources = []
+    retrieved_chunks = []
     seen_files = set()
     i = 0
 
@@ -252,6 +395,8 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
         chunk_text = r.payload.get("text", "")
         filename = r.payload.get("filename", "unknown")
         folder = r.payload.get("folder_path", "")
+        chunk_index = r.payload.get("chunk_index")
+        file_id = r.payload.get("file_id")
         file_key = f"{filename}_{chunk_text[:50]}"
 
         if file_key in seen_files:
@@ -265,12 +410,22 @@ def generate_answer(query_text, folder_path=None, selected_file=None, history=No
             "filename": filename,
             "folder_path": folder
         })
+        retrieved_chunks.append({
+            "rank": i,
+            "filename": filename,
+            "folder_path": folder,
+            "file_id": file_id,
+            "chunk_index": chunk_index,
+            # Scroll results used for overview mode do not have similarity scores.
+            "score": getattr(r, "score", None),
+            "text": chunk_text
+        })
 
     messages = []
     for m in history[-6:]:
         messages.append({"role": m.role, "content": m.content})
 
-    if selected_file and is_overview_question(query_text):
+    if overview_mode:
         prompt_instruction = f"""You are an AI assistant for Fuse Power Management.
 The user has selected the file "{selected_file}" and wants an overview of its contents.
 Based on ALL the context provided below (which contains chunks from the entire file), provide a comprehensive summary including:
@@ -302,14 +457,17 @@ Answer:"""
     })
 
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=ANSWER_MODEL,
         messages=messages,
         temperature=0
     )
 
     return {
         "answer": response.choices[0].message.content,
-        "sources": sources
+        "sources": sources,
+        "rewritten_query": search_query,
+        "retrieved_chunks": retrieved_chunks,
+        "model": ANSWER_MODEL
     }
 
 # ── Startup ───────────────────────────────────────────────
@@ -332,11 +490,15 @@ def logout():
 
 @app.get("/me")
 def get_me(username: str = Depends(verify_password)):
-    return {"username": username}
+    return {"username": username, "is_admin": username == ADMIN_USER}
 
 @app.get("/ui")
 def serve_ui(username: str = Depends(verify_password)):
-    return FileResponse(os.path.join(os.path.dirname(__file__), "app.html"))
+    return FileResponse(os.path.join(BASE_DIR, "app.html"))
+
+@app.get("/admin")
+def serve_admin(username: str = Depends(require_admin)):
+    return FileResponse(os.path.join(BASE_DIR, "logs.html"))
 
 @app.get("/folders")
 def get_folders():
@@ -380,30 +542,110 @@ def get_files(folder_path: str = None):
 
 @app.post("/query")
 def query(request: QueryRequest, username: str = Depends(verify_password)):
+    start_time = time.perf_counter()
+
     result = generate_answer(
         request.question,
         request.folder_path,
         request.selected_file,
         request.history
     )
-    log_conversation(
+
+    latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+    row_id = log_conversation(
         username=username,
         question=request.question,
         answer=result["answer"],
         folder_path=request.folder_path,
         selected_file=request.selected_file,
-        sources=result["sources"]
+        sources=result.get("sources", []),
+        rewritten_query=result.get("rewritten_query"),
+        retrieved_chunks=result.get("retrieved_chunks", []),
+        model=result.get("model"),
+        latency_ms=latency_ms
     )
-    return result
+
+    # Keep the UI payload lean; the full retrieved_chunks stay in the DB for eval.
+    return {
+        "id": row_id,
+        "answer": result["answer"],
+        "sources": result.get("sources", []),
+    }
+
+@app.post("/feedback")
+def submit_feedback(request: FeedbackRequest, username: str = Depends(verify_password)):
+    """Any logged-in user can rate an answer (👍/👎) with an optional comment."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.execute(
+            """UPDATE conversations
+               SET user_feedback = ?,
+                   feedback_comment = COALESCE(?, feedback_comment)
+               WHERE id = ?""",
+            (request.feedback, request.comment, request.conversation_id)
+        )
+        conn.commit()
+        updated = cursor.rowcount
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save feedback: {e}")
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"ok": True, "id": request.conversation_id}
+
+@app.post("/evaluate")
+def evaluate(request: EvaluationRequest, username: str = Depends(require_admin)):
+    """Admin fills in the expected answer and/or review status for a row."""
+    updates = []
+    values = []
+    if request.expected_answer is not None:
+        updates.append("expected_answer = ?")
+        values.append(request.expected_answer)
+    if request.evaluation_status is not None:
+        updates.append("evaluation_status = ?")
+        values.append(request.evaluation_status)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    values.append(request.conversation_id)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.execute(
+            f"UPDATE conversations SET {', '.join(updates)} WHERE id = ?",
+            values
+        )
+        conn.commit()
+        updated = cursor.rowcount
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save evaluation: {e}")
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"ok": True, "id": request.conversation_id}
 
 @app.get("/logs")
-def get_logs(username: str = Depends(verify_password)):
-    if username != "sarvin":
-        raise HTTPException(status_code=403, detail="Access denied")
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT * FROM conversations ORDER BY timestamp DESC LIMIT 100"
-    ).fetchall()
-    conn.close()
-    return {"conversations": [dict(r) for r in rows]}
+def get_logs(limit: Optional[int] = None, username: str = Depends(require_admin)):
+    """Full conversation history (no 100-row cap). Pass ?limit=N to page."""
+    rows = fetch_all_rows(limit=limit)
+    return {"count": len(rows), "conversations": rows}
+
+@app.get("/logs/export")
+def export_logs(format: str = "jsonl", username: str = Depends(require_admin)):
+    rows = fetch_all_rows()
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+    if format == "csv":
+        content = rows_to_csv(rows)
+        media_type = "text/csv"
+        filename = f"fuse_eval_dataset_{stamp}.csv"
+    else:
+        content = rows_to_jsonl(rows)
+        media_type = "application/x-ndjson"
+        filename = f"fuse_eval_dataset_{stamp}.jsonl"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

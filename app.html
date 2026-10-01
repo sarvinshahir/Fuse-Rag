@@ -309,6 +309,22 @@
   .source-name { font-weight: 600; color: var(--text); }
   .source-path { color: var(--text-muted); margin-top: 2px; }
 
+  .feedback-row { margin-top: 10px; display: flex; align-items: center; gap: 6px; }
+  .fb-btn {
+    border: 1px solid var(--border); background: white; border-radius: 8px;
+    padding: 4px 9px; font-size: 13px; cursor: pointer; line-height: 1; color: var(--text-muted);
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .fb-btn:hover { border-color: var(--accent); }
+  .fb-btn.active-up { background: #E7F7F0; border-color: #10B981; }
+  .fb-btn.active-down { background: #FDECEC; border-color: #EF4444; }
+  .fb-comment {
+    flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 8px;
+    padding: 5px 9px; font-size: 12px; outline: none; font-family: inherit; display: none;
+  }
+  .fb-comment:focus { border-color: var(--accent); }
+  .fb-thanks { font-size: 12px; color: #10B981; }
+
   .thinking {
     display: flex; gap: 4px; align-items: center; padding: 12px 16px;
     background: var(--ai-bubble); border-radius: 16px; border-bottom-left-radius: 4px; width: fit-content;
@@ -739,7 +755,7 @@ async function sendMessage() {
     removeThinking(thinkingId);
     const answer = data.answer || 'No answer returned.';
     const sources = data.sources || [];
-    addMessage('ai', answer, sources);
+    addMessage('ai', answer, sources, null, data.id);
     messages.push({ role: 'assistant', content: answer });
   } catch(e) {
     removeThinking(thinkingId);
@@ -754,7 +770,7 @@ function hideEmptyState() {
   if (el) el.remove();
 }
 
-function addMessage(role, text, sources, initials) {
+function addMessage(role, text, sources, initials, convId) {
   const container = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = `message ${role}`;
@@ -794,10 +810,64 @@ function addMessage(role, text, sources, initials) {
     bubble.appendChild(list);
   }
 
+  if (role === 'ai' && convId) {
+    bubble.appendChild(buildFeedback(convId));
+  }
+
   div.appendChild(avatar);
   div.appendChild(bubble);
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+function buildFeedback(convId) {
+  const row = document.createElement('div');
+  row.className = 'feedback-row';
+
+  const up = document.createElement('button');
+  up.className = 'fb-btn'; up.textContent = '👍'; up.title = 'Helpful';
+  const down = document.createElement('button');
+  down.className = 'fb-btn'; down.textContent = '👎'; down.title = 'Not helpful';
+  const comment = document.createElement('input');
+  comment.className = 'fb-comment'; comment.placeholder = 'What was wrong? (optional, press Enter)';
+
+  up.onclick = () => {
+    up.classList.add('active-up'); down.classList.remove('active-down');
+    comment.style.display = 'none';
+    sendFeedback(convId, 'up', null);
+  };
+  down.onclick = () => {
+    down.classList.add('active-down'); up.classList.remove('active-up');
+    comment.style.display = 'block'; comment.focus();
+    sendFeedback(convId, 'down', null);
+  };
+  comment.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendFeedback(convId, 'down', comment.value.trim());
+      const thanks = document.createElement('span');
+      thanks.className = 'fb-thanks'; thanks.textContent = 'Thanks!';
+      comment.replaceWith(thanks);
+    }
+  };
+
+  row.appendChild(up);
+  row.appendChild(down);
+  row.appendChild(comment);
+  return row;
+}
+
+async function sendFeedback(convId, value, comment) {
+  try {
+    await fetch(`${API}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ conversation_id: convId, feedback: value, comment })
+    });
+  } catch (e) {
+    console.error('Feedback failed:', e);
+  }
 }
 
 function formatText(text) {

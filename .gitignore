@@ -14,5 +14,8 @@ __pycache__/
 .streamlit/
 ingested_files.txt
 
+# Local conversation DB (created at runtime)
+conversations.db
+
 
 delta_token.txt
